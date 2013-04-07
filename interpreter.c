@@ -37,8 +37,13 @@ typedef struct pair Pair;
 
 void printList();
 void printPair();
+Token scheme_read();
+Pair *read_tail();
+Token cons();
 
 Token tokenBuffer[MAX_TOKENS];
+Token *tp;
+char *ip;
 
 Pair *pairalloc(void) {
   return (Pair *) malloc(sizeof(Pair));
@@ -106,7 +111,7 @@ Token tFromStr(char *s) {
       t->type = T_PAIR;
       t->pair = NULL;
     } else {
-      t->type = T_SYMBOL;
+      t->type = T_SYMBOL;      
       t->symbol = s;
     }
   } else {
@@ -124,19 +129,61 @@ Token tFromPair(Pair *p) {
   return *t;
 }
 
-Token *tokenize(char *input) {
-  Token *tp = &tokenBuffer[0];
+Token tokenize(char *input) {  
   char *currtok;
   char inputcp[MAX_INPUT];
+  tp = &tokenBuffer[0];  
   strcpy(inputcp, input);
   currtok = strtok(inputcp, SINGLE_CHAR_TOKENS);
   do {
-    *(tp++) = tFromStr(currtok);
+    *(tp++) = tFromStr(currtok);    
   } while ((currtok = strtok(NULL, SINGLE_CHAR_TOKENS)) != NULL);
-  Token end;
-  end.type = T_END;
-  *tp = end;
-  return tokenBuffer;
+  ip = input;
+  tp = &tokenBuffer[0];
+  return scheme_read();
+}
+
+void run_down_symbol() {
+  while (strchr(SINGLE_CHAR_TOKENS, *(++ip)) == NULL)
+    ;
+}
+
+Token scheme_read() {
+  Token temp;
+  if (*ip == ' ') {
+    while (*(++ip) == ' ')
+      ;
+  }
+  switch (*ip) {
+  case '\'':
+    ip++;
+    temp = scheme_read();    
+    return cons(tFromStr("quote"), cons(temp, tFromStr("nil")));
+  case '(':
+    ip++;
+    return tFromPair(read_tail());
+  default:    
+    run_down_symbol();
+    return *(tp++);
+  }
+}
+
+Pair *read_tail() {
+  Token first;
+  Pair *rest;
+  if (*ip == ' ') {
+    while (*(++ip) == ' ')
+      ;
+  }
+  switch (*ip) {
+  case ')':
+    ip++;
+    return NULL;
+  default:
+    first = scheme_read();
+    rest = read_tail();
+    return makePair(first, rest);
+  }
 }
 
 Token car(Token t) {
@@ -167,11 +214,6 @@ _main() {
   printf("\n");
   printToken(cdr(cdr(car(t0))));
   printf("\n");
-  Token *tp = tokenize("(define (enumerate-tree tree)(cond ((null? tree) nil)((not (pair? tree)) (list tree))(else (append (enumerate-tree (car tree))(enumerate-tree (cdr tree))))))(enumerate-tree (list 1 (list 2 (list 3 4)) 5))");
-  while ((*tp).type != T_END) {
-    printToken(*tp);
-    printf(" ");
-    tp++;
-  }  
+  printToken(tokenize("(define fact (lambda (n) (if (<= n 1) 1 (* n (fact (- n 1))))))"));    
   ngetchx();
 }
