@@ -4,6 +4,7 @@
 
 #define MAX_TOKENS 200
 #define MAX_INPUT 1000
+#define MAXSTR 15
 #define ESC 8
 
 #include <string.h>
@@ -27,7 +28,7 @@ struct procedure;
 
 struct token {
   int type;
-  char *symbol;
+  char symbol[MAXSTR];
   double number;
   struct pair *pair;
   struct procedure *procedure;
@@ -40,17 +41,9 @@ struct pair {
 };
 typedef struct pair Pair;
 
-struct procedure {
-  int type;
-  Token *(*func)(Token *, Token *);
-  Pair *proc_list;
-  Token *rest;
-};
-typedef struct procedure Procedure;
-
 struct bNode {
-  char *key;
-  Token *item;
+  char key[MAXSTR];
+  struct token *item;
   struct bNode *next;
 };
 typedef struct bNode BNode;
@@ -60,6 +53,15 @@ struct binding {
   struct binding *parent;
 };
 typedef struct binding Binding;
+
+struct procedure {
+  int type;
+  Token *(*func)(Token *, Token *);
+  Pair *args_list;
+  Binding *env;
+  Token *rest;
+};
+typedef struct procedure Procedure;
 
 void printList();
 void printPair();
@@ -71,6 +73,9 @@ Token *cons();
 void addBinding();
 Token *eval();
 Token *apply();
+Token *tFromNumber();
+Token *tFromStr();
+Binding *makeNewFrame();
 
 Token tokenBuffer[MAX_TOKENS];
 Token *tp;
@@ -90,6 +95,19 @@ void bindPrimitiveProc(Binding *b, char *symbol,
   t->type = T_PROCEDURE;
   t->procedure = p;
   addBinding(b, symbol, t);
+}
+
+Token *makeLambda(Binding *b, Pair *formals, Token *value) {
+  Procedure *p = procalloc();
+  Binding *callframe = makeNewFrame(b);
+  p->type = P_LAMBDA;
+  p->args_list = formals;
+  p->env = callframe;
+  p->rest = value;
+  Token *t = tokenalloc();
+  t->type = T_PROCEDURE;
+  t->procedure = p;
+  return t;
 }
 
 BNode *bnodealloc() {
@@ -121,12 +139,17 @@ BNode *findBinding(Binding *b, char *key) {
   return NULL;
 }
 
-void addBinding(Binding *b, char *key, Token *item) {
+void addBinding(Binding *b, char *key, Token *i) {
   BNode *temp = b->head;
-  BNode *new = bnodealloc();  
-  new->item = item;
-  new->key = key;
+  BNode *new = bnodealloc();
+  strcpy(&((new->key)[0]), key);
   new->next = temp;
+  if (i->type == T_NUMBER)
+    new->item = tFromNumber(i->number);
+  else if (i->type == T_SYMBOL)
+    new->item = tFromStr(i->symbol);
+  else
+    new->item = i;
   b->head = new;
 }
 
@@ -219,8 +242,8 @@ Token *tFromStr(char *s) {
       t->type = T_PAIR;
       t->pair = NULL;
     } else {
-      t->type = T_SYMBOL;      
-      t->symbol = s;
+      t->type = T_SYMBOL;
+      strcpy(&((t->symbol)[0]), s);
     }
   } else {
     t->type = T_NUMBER;
@@ -295,8 +318,11 @@ Pair *read_tail() {
 }
 
 Token *car(Token *t, Token *dummy) {
+  if (t == NULL)
+    return NULL;
   if (t->type == T_PAIR)
     return (t->pair)->item;
+  return NULL;
 }
 
 Token *cdr(Token *t, Token *dummy) {
@@ -368,8 +394,8 @@ Token *eval(Token *t, Binding *b) {
       return car(rest, NULL);
     } else if (strcmp(first->symbol, "quote") == 0) {
       return car(rest, NULL);
-    } else if (strcmp(first->symbol, "bin") == 0) {
-      printBinding(b); 
+    } else if (strcmp(first->symbol, "lambda") == 0) {
+      return makeLambda(b, rest->pair->item->pair, rest->pair->next->item);
     } else {
       return apply(findBinding(b, first->symbol)->item->procedure, rest, b);
     }
@@ -378,55 +404,74 @@ Token *eval(Token *t, Binding *b) {
 }
 
 Token *apply(Procedure *p, Token *args, Binding *b) {
+  Pair *formals;
+  Pair *pargs;
+  Binding *callframe;
   switch (p->type) {
   case P_PRIMITIVE:
     return (p->func)(eval(car(args, NULL), b),
                      eval(car(cdr(args, NULL), NULL), b));
+  case P_LAMBDA:
+    formals = p->args_list;
+    callframe = p->env;
+    pargs = args->pair;
+    while (formals != NULL) {
+      addBinding(b, formals->item->symbol, eval(pargs->item, b));
+      pargs = pargs->next;
+      formals = formals->next;
+    }
+    return eval(p->rest, callframe);
   }
 }
 
 void test() {
   clrscr();
-  Token *null = tFromStr("nil");
-  Token *t1 = tFromStr("vas");
-  Token *t2 = tFromStr("102.32");
-  Token *t3 = cons(t1, cons(t2, null));
-  Token *t0 = cons(t3, cons(null, null));
-  Token *dummy = NULL;
-  printToken(t0);
-  printf("\n");
-  printToken(car(t0, dummy));
-  printf("\n");
-  printToken(cdr(cdr(car(t0, dummy), dummy), dummy));
-  printf("\n");
-  printToken(tokenize("(define fact (lambda (n) (if (<= n 1) 1 (* n (fact (- n 1))))))"));  
-  ngetchx();
-  clrscr();
-  char *ca = "a";
-  char *cb = "b";
-  char *cc = "c";  
-  Binding *b = makeNewFrame(NULL);
-  Binding *c = makeNewFrame(b);
-  addBinding(b, ca, t1);
-  addBinding(b, cc, null);
-  addBinding(c, cb, t2);
-  addBinding(c, cc, t3);
-  printToken(findBinding(b, ca)->item);
-  printf("\n");
-  printToken(findBinding(c, cb)->item);
-  printf("\n");
-  printToken(findBinding(c, cc)->item);
-  printf("\n");
-  printToken(findBinding(c, ca)->item);
-  printf("\n");
-  printBinding(b);
-  printf("\n");
-  printBinding(c);
+  Binding *global = makeGlobalFrame();
+  printToken(eval(tokenize("(define x (lambda (a) (* a a)))"), global));
   printf("\n");
   ngetchx();
-  clrscr();
-  b = makeGlobalFrame();
-  printBinding(b);
+  printToken(eval(tokenize("(x 5)"), global));
+  printf("\n");
+//   Token *null = tFromStr("nil");
+//   Token *t1 = tFromStr("vas");
+//   Token *t2 = tFromStr("102.32");
+//   Token *t3 = cons(t1, cons(t2, null));
+//   Token *t0 = cons(t3, cons(null, null));
+//   Token *dummy = NULL;
+//   printToken(t0);
+//   printf("\n");
+//   printToken(car(t0, dummy));
+//   printf("\n");
+//   printToken(cdr(cdr(car(t0, dummy), dummy), dummy));
+//   printf("\n");
+//   printToken(tokenize("(define fact (lambda (n) (if (<= n 1) 1 (* n (fact (- n 1))))))"));  
+//   ngetchx();
+//   clrscr();
+//   char *ca = "a";
+//   char *cb = "b";
+//   char *cc = "c";  
+//   Binding *b = makeNewFrame(NULL);
+//   Binding *c = makeNewFrame(b);
+//   addBinding(b, ca, t1);
+//   addBinding(b, cc, null);
+//   addBinding(c, cb, t2);
+//   addBinding(c, cc, t3);
+//   printToken(findBinding(b, ca)->item);
+//   printf("\n");
+//   printToken(findBinding(c, cb)->item);
+//   printf("\n");
+//   printToken(findBinding(c, cc)->item);
+//   printf("\n");
+//   printToken(findBinding(c, ca)->item);
+//   printf("\n");
+//   printBinding(b);
+//   printf("\n");
+//   printBinding(c);
+//   printf("\n");
+//   ngetchx();
+//   clrscr();
+//   b = makeGlobalFrame();
+//   printBinding(b);
   ngetchx();
 }
 
