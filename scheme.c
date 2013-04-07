@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <kbd.h>
 #include <timath.h>
+#include <mem.h>
 
 char SYMBOL_CONTAINS[] = "0123456789abcdefghijklmnopqrstuvwxyz"
   "ABCDEFGHIJKLMNOPQRSTUVWXYZ!$%&*/:<=>?@^_~+-.";
@@ -142,14 +143,11 @@ BNode *findBinding(Binding *b, char *key) {
 void addBinding(Binding *b, char *key, Token *i) {
   BNode *temp = b->head;
   BNode *new = bnodealloc();
+  Token *t = tokenalloc();
   strcpy(&((new->key)[0]), key);
-  new->next = temp;
-  if (i->type == T_NUMBER)
-    new->item = tFromNumber(i->number);
-  else if (i->type == T_SYMBOL)
-    new->item = tFromStr(i->symbol);
-  else
-    new->item = i;
+  memcpy(t, i, sizeof(Token));
+  new->next = temp;  
+  new->item = t;
   b->head = new;
 }
 
@@ -260,6 +258,16 @@ Token *tFromPair(Pair *p) {
   return t;
 }
 
+Token *tFromPredicate(short i) {
+  Token *t;
+  t = tokenalloc();
+  if (i)
+    t->type = T_TRUE;
+  else
+    t->type = T_FALSE;
+  return t;
+}
+
 Token *tokenize(char *input) {  
   char *currtok;
   char inputcp[MAX_INPUT];
@@ -355,6 +363,16 @@ Token* scheme_div(Token *t1, Token *t2) {
     return tFromNumber(t1->number / t2->number);
 }
 
+Token* scheme_lt(Token *t1, Token *t2) {
+  if (t1->type == T_NUMBER && t2->type == T_NUMBER)
+    return tFromPredicate(t1->number < t2->number);
+}
+
+Token* scheme_gt(Token *t1, Token *t2) {
+  if (t1->type == T_NUMBER && t2->type == T_NUMBER)
+    return tFromPredicate(t1->number > t2->number);
+}
+
 short scheme_true(Token *t) {
   return (t->type != T_FALSE);
 }
@@ -372,6 +390,8 @@ Binding *makeGlobalFrame() {
   bindPrimitiveProc(b, "-", (Token *(*)(Token *, Token *)) scheme_sub);
   bindPrimitiveProc(b, "*", (Token *(*)(Token *, Token *)) scheme_mul);
   bindPrimitiveProc(b, "/", (Token *(*)(Token *, Token *)) scheme_div);
+  bindPrimitiveProc(b, "<", (Token *(*)(Token *, Token *)) scheme_lt);
+  bindPrimitiveProc(b, ">", (Token *(*)(Token *, Token *)) scheme_gt);
   return b;
 }
 
@@ -394,10 +414,15 @@ Token *eval(Token *t, Binding *b) {
       return car(rest, NULL);
     } else if (strcmp(first->symbol, "quote") == 0) {
       return car(rest, NULL);
+    } else if (strcmp(first->symbol, "if") == 0) {
+      if (scheme_true(eval(car(rest, NULL), b)))
+        return eval(car(cdr(rest, NULL), NULL), b);
+      else
+        return eval(car(cdr(cdr(rest, NULL), NULL), NULL), b);
     } else if (strcmp(first->symbol, "lambda") == 0) {
       return makeLambda(b, rest->pair->item->pair, rest->pair->next->item);
     } else {
-      return apply(findBinding(b, first->symbol)->item->procedure, rest, b);
+      return apply(eval(first, b)->procedure, rest, b);
     }
     break;
   }
@@ -427,11 +452,11 @@ Token *apply(Procedure *p, Token *args, Binding *b) {
 void test() {
   clrscr();
   Binding *global = makeGlobalFrame();
-  printToken(eval(tokenize("(define x (lambda (a) (* a a)))"), global));
+  printToken(eval(tokenize("(define f (lambda (x) (lambda (y) (+ x y))))"), global));
   printf("\n");
-  ngetchx();
-  printToken(eval(tokenize("(x 5)"), global));
+  printToken(eval(tokenize("((f 4) 3)"), global));
   printf("\n");
+  printToken(eval(tokenize("(+ (* 3 (+ (* 2 4) (+ 3 5))) (+ (- 10 7) 6))"), global));  
 //   Token *null = tFromStr("nil");
 //   Token *t1 = tFromStr("vas");
 //   Token *t2 = tFromStr("102.32");
@@ -475,17 +500,86 @@ void test() {
   ngetchx();
 }
 
-_main() {
+char *strtobuf(char *bp, char *str) {
+  while (*str != '\0') {
+    putchar(*(bp++) = *(str++));
+  }
+  return bp;
+}
+
+short getstr(char *buf) {
+  char *bp = buf; // points to next empty spot on buffer
+  short c;
+  short result;
+  clrscr();
+  while (1) {
+    c = ngetchx();
+    switch (c) {
+    case KEY_ESC:
+      return 0;      
+    case 13:
+      *bp = '\0';
+      return 1;
+    case 173: // space
+      putchar(*(bp++) = ' ');      
+      break;
+    case 32: // minus sign
+      putchar(*(bp++) = (char) 173);      
+      break;
+    case 257: // backspace
+      *(--bp) = '\0';
+      clrscr();
+      printf("%s", buf);
+      break;
+    case ',': // space
+      putchar(*(bp++) = '\'');
+      break;
+    case '+':
+      bp = strtobuf(bp, "(+ ");
+      break;
+    case '-':
+      bp = strtobuf(bp, "(- ");
+      break;
+    case '*':
+      bp = strtobuf(bp, "(* ");
+      break;
+    case '/':
+      bp = strtobuf(bp, "(/ ");
+      break;
+    case '|':
+      bp = strtobuf(bp, "(if ");
+      break;
+    case '=':
+      bp = strtobuf(bp, "(define ");
+      break;
+    case 263:
+      bp = strtobuf(bp, "(lambda (");
+      break;
+    case 277:
+      bp = strtobuf(bp, "(car ");
+      break;
+    case 266:
+      bp = strtobuf(bp, "(cdr ");
+      break;
+    case 278:
+      bp = strtobuf(bp, "(cons ");
+      break;
+    default:
+      *(bp++) = (char) c;
+      putchar(c);
+    }
+  }
+}
+
+void _main() {
   if (1) {
     char buf[MAX_INPUT];
     int cp = 0;
-    char *bp;
-    clrscr();
+    char *bp;    
     Binding *global = makeGlobalFrame();
     while (1) {
-      getsn(buf, MAX_INPUT);
-      if (buf[0] == ESC)
-        break;
+      if (! getstr(buf))
+        break;      
       bp = buf;
       while (*bp != '\0') {
         if (*bp == '(')
@@ -495,13 +589,15 @@ _main() {
         bp++;
       }
       while (cp != 0) {
-        *(bp++) = ')';      
+        *(bp++) = ')';
+        putchar(')');
         cp--;
       }
       *bp = '\0';
       printf("\n");
       printToken(eval(tokenize(buf), global));
-      printf("\n");    
+      printf("\n");
+      ngetchx();
     }
   } else {
     test();
