@@ -406,6 +406,8 @@ Token *eval(Token *t, Binding *b) {
   case T_FALSE:
     return t;   
   case T_PAIR:
+    if (t->pair == NULL)
+      return tFromStr("nil");
     first = car(t, NULL);
     rest = cdr(t, NULL); 
     if (strcmp(first->symbol, "define") == 0) {
@@ -511,13 +513,12 @@ short getstr(char *buf) {
   char *bp = buf; // points to next empty spot on buffer
   short c;
   short result;
-  clrscr();
   while (1) {
     c = ngetchx();
     switch (c) {
     case KEY_ESC:
       return 0;      
-    case 13:
+    case 13: // Enter
       *bp = '\0';
       return 1;
     case 173: // space
@@ -530,10 +531,7 @@ short getstr(char *buf) {
       *(--bp) = '\0';
       clrscr();
       printf("%s", buf);
-      break;
-    case ',': // space
-      putchar(*(bp++) = '\'');
-      break;
+      break;    
     case '+':
       bp = strtobuf(bp, "(+ ");
       break;
@@ -552,16 +550,23 @@ short getstr(char *buf) {
     case '=':
       bp = strtobuf(bp, "(define ");
       break;
-    case 263:
+    case ',':
       bp = strtobuf(bp, "(lambda (");
       break;
-    case 277:
+    case 263: // clear
+      bp = buf;
+      clrscr();
+      break;
+    case 149: // EE
+      bp = strtobuf(bp, "nil");
+      break;
+    case 277: // home
       bp = strtobuf(bp, "(car ");
       break;
-    case 266:
+    case 266: // mode
       bp = strtobuf(bp, "(cdr ");
       break;
-    case 278:
+    case 278: // catalog
       bp = strtobuf(bp, "(cons ");
       break;
     default:
@@ -577,6 +582,7 @@ void _main() {
     int cp = 0;
     char *bp;    
     Binding *global = makeGlobalFrame();
+    clrscr();
     while (1) {
       if (! getstr(buf))
         break;      
@@ -596,8 +602,7 @@ void _main() {
       *bp = '\0';
       printf("\n");
       printToken(eval(tokenize(buf), global));
-      printf("\n");
-      ngetchx();
+      printf("\n");      
     }
   } else {
     test();
