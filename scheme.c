@@ -69,6 +69,8 @@ Token *tokenalloc();
 Pair *read_tail();
 Token *cons();
 void addBinding();
+Token *eval();
+Token *apply();
 
 Token tokenBuffer[MAX_TOKENS];
 Token *tp;
@@ -348,13 +350,38 @@ Binding *makeGlobalFrame() {
 }
 
 Token *eval(Token *t, Binding *b) {
+  Token *first;
+  Token *rest;
   switch (t->type) {
   case T_SYMBOL:
     return findBinding(b, t->symbol)->item;
-  case T_NUMBER: case T_TRUE: case T_FALSE:
-    return t;
+  case T_NUMBER:
+  case T_TRUE:
+  case T_FALSE:
+    return t;   
   case T_PAIR:
+    first = car(t, NULL);
+    rest = cdr(t, NULL); 
+    if (strcmp(first->symbol, "define") == 0) {
+      addBinding(b, car(rest, NULL)->symbol,
+                 eval(car(cdr(rest, NULL), NULL), b));
+      return car(rest, NULL);
+    } else if (strcmp(first->symbol, "quote") == 0) {
+      return car(rest, NULL);
+    } else if (strcmp(first->symbol, "bin") == 0) {
+      printBinding(b); 
+    } else {
+      return apply(findBinding(b, first->symbol)->item->procedure, rest, b);
+    }
     break;
+  }
+}
+
+Token *apply(Procedure *p, Token *args, Binding *b) {
+  switch (p->type) {
+  case P_PRIMITIVE:
+    return (p->func)(eval(car(args, NULL), b),
+                     eval(car(cdr(args, NULL), NULL), b));
   }
 }
 
@@ -383,7 +410,7 @@ void test() {
   addBinding(b, ca, t1);
   addBinding(b, cc, null);
   addBinding(c, cb, t2);
-  addBinding(c, cc, t1);
+  addBinding(c, cc, t3);
   printToken(findBinding(b, ca)->item);
   printf("\n");
   printToken(findBinding(c, cb)->item);
@@ -391,6 +418,10 @@ void test() {
   printToken(findBinding(c, cc)->item);
   printf("\n");
   printToken(findBinding(c, ca)->item);
+  printf("\n");
+  printBinding(b);
+  printf("\n");
+  printBinding(c);
   printf("\n");
   ngetchx();
   clrscr();
@@ -400,11 +431,12 @@ void test() {
 }
 
 _main() {
-  if (0) {
+  if (1) {
     char buf[MAX_INPUT];
     int cp = 0;
     char *bp;
     clrscr();
+    Binding *global = makeGlobalFrame();
     while (1) {
       getsn(buf, MAX_INPUT);
       if (buf[0] == ESC)
@@ -423,7 +455,7 @@ _main() {
       }
       *bp = '\0';
       printf("\n");
-      printToken(tokenize(buf));
+      printToken(eval(tokenize(buf), global));
       printf("\n");    
     }
   } else {
