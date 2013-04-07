@@ -17,7 +17,7 @@ char SYMBOL_CONTAINS[] = "0123456789abcdefghijklmnopqrstuvwxyz"
 char WHITESPACE[] = " \n\t";
 char SINGLE_CHAR_TOKENS[] = "()' \n\t";
 
-enum {T_SYMBOL, T_NUMBER, T_TRUE, T_FALSE, T_PAIR, T_procedure};
+enum {T_SYMBOL, T_NUMBER, T_TRUE, T_FALSE, T_PAIR, T_PROCEDURE};
 
 enum {P_PRIMITIVE, P_LAMBDA};
 
@@ -35,14 +35,14 @@ struct token {
 typedef struct token Token;
 
 struct pair {
-  Token item;
+  Token *item;
   struct pair *next;
 };
 typedef struct pair Pair;
 
 struct procedure {
   int type;
-  Token (*func)(Token, Token);
+  Token *(*func)(Token *, Token *);
   Pair *proc_list;
   Token *rest;
 };
@@ -50,7 +50,7 @@ typedef struct procedure Procedure;
 
 struct bNode {
   char *key;
-  Token item;
+  Token *item;
   struct bNode *next;
 };
 typedef struct bNode BNode;
@@ -64,14 +64,31 @@ typedef struct binding Binding;
 void printList();
 void printPair();
 void printToken();
-Token scheme_read();
+Token *scheme_read();
+Token *tokenalloc();
 Pair *read_tail();
-Token cons();
+Token *cons();
+void addBinding();
 
 Token tokenBuffer[MAX_TOKENS];
 Token *tp;
 char *ip;
 
+
+Procedure *procalloc() {
+  return (Procedure *) malloc(sizeof(Procedure));
+}
+
+void bindPrimitiveProc(Binding *b, char *symbol,
+                       Token *(*func)(Token *, Token *)) {
+  Procedure *p = procalloc();
+  p->type = P_PRIMITIVE;
+  p->func = func;
+  Token *t = tokenalloc();
+  t->type = T_PROCEDURE;
+  t->procedure = p;
+  addBinding(b, symbol, t);
+}
 
 BNode *bnodealloc() {
   return (BNode *) malloc(sizeof(BNode));
@@ -102,13 +119,13 @@ BNode *findBinding(Binding *b, char *key) {
   return NULL;
 }
 
-void addBinding(Binding *b, char *key, Token item) {
+void addBinding(Binding *b, char *key, Token *item) {
   BNode *temp = b->head;
   BNode *new = bnodealloc();  
   new->item = item;
   new->key = key;
   new->next = temp;
-  b->head = new;  
+  b->head = new;
 }
 
 void printBinding(Binding *b) {
@@ -127,7 +144,7 @@ Pair *pairalloc(void) {
   return (Pair *) malloc(sizeof(Pair));
 }
 
-Pair *makePair(Token item, Pair *next) {
+Pair *makePair(Token *item, Pair *next) {
   Pair *p;
   p = pairalloc();
   p->item = item;
@@ -135,13 +152,13 @@ Pair *makePair(Token item, Pair *next) {
   return p;
 }
 
-void printToken(Token t) {
-  switch (t.type) {
+void printToken(Token *t) {
+  switch (t->type) {
   case T_SYMBOL:
-    printf("%s", t.symbol);
+    printf("%s", t->symbol);
     break;
   case T_NUMBER:
-    printf("%.12g", t.number);
+    printf("%.12g", t->number);
     break;
   case T_TRUE:
     printf("#t");
@@ -150,7 +167,10 @@ void printToken(Token t) {
     printf("#f");
     break;
   case T_PAIR:
-    printList(t.pair);
+    printList(t->pair);
+    break;
+  case T_PROCEDURE:
+    printf("<procedure>");
   }
 }
 
@@ -176,7 +196,15 @@ Token *tokenalloc(void) {
   return (Token *) malloc(sizeof(Token));
 }
 
-Token tFromStr(char *s) {
+Token *tFromNumber(double d) {
+  Token *t;
+  t = tokenalloc();
+  t->type = T_NUMBER;
+  t->number = d;
+  return t;
+}
+
+Token *tFromStr(char *s) {
   double number;
   Token *t;
   t = tokenalloc();
@@ -196,25 +224,25 @@ Token tFromStr(char *s) {
     t->type = T_NUMBER;
     t->number = number;
   }
-  return *t;
+  return t;
 }
 
-Token tFromPair(Pair *p) {
+Token *tFromPair(Pair *p) {
   Token *t;
   t = tokenalloc();
   t->type = T_PAIR;
   t->pair = p;
-  return *t;
+  return t;
 }
 
-Token tokenize(char *input) {  
+Token *tokenize(char *input) {  
   char *currtok;
   char inputcp[MAX_INPUT];
   tp = &tokenBuffer[0];  
   strcpy(inputcp, input);
   currtok = strtok(inputcp, SINGLE_CHAR_TOKENS);
   do {
-    *(tp++) = tFromStr(currtok);    
+    *(tp++) = *tFromStr(currtok);
   } while ((currtok = strtok(NULL, SINGLE_CHAR_TOKENS)) != NULL);
   ip = input;
   tp = &tokenBuffer[0];
@@ -226,8 +254,8 @@ void run_down_symbol() {
     ;
 }
 
-Token scheme_read() {
-  Token temp;
+Token *scheme_read() {
+  Token *temp;
   if (*ip == ' ') {
     while (*(++ip) == ' ')
       ;
@@ -235,19 +263,19 @@ Token scheme_read() {
   switch (*ip) {
   case '\'':
     ip++;
-    temp = scheme_read();    
+    temp = scheme_read();
     return cons(tFromStr("quote"), cons(temp, tFromStr("nil")));
   case '(':
     ip++;
     return tFromPair(read_tail());  
   default:
     run_down_symbol();
-    return *(tp++);
+    return tp++;
   }
 }
 
 Pair *read_tail() {
-  Token first;
+  Token *first;
   Pair *rest;
   if (*ip == ' ') {
     while (*(++ip) == ' ')
@@ -264,33 +292,65 @@ Pair *read_tail() {
   }
 }
 
-Token car(Token t) {
-  if (t.type == T_PAIR)
-    return t.pair->item;
+Token *car(Token *t, Token *dummy) {
+  if (t->type == T_PAIR)
+    return (t->pair)->item;
 }
 
-Token cdr(Token t) {
-  if (t.type == T_PAIR)
-    return tFromPair(t.pair->next);
+Token *cdr(Token *t, Token *dummy) {
+  if (t->type == T_PAIR)
+    return tFromPair((t->pair)->next);
 }
 
-Token cons(Token t1, Token t2) {
-  if (t2.type == T_PAIR)
-    return tFromPair(makePair(t1, t2.pair));  
+Token *cons(Token *t1, Token *t2) {
+  if (t2->type == T_PAIR)
+    return tFromPair(makePair(t1, t2->pair));
 }
 
-short scheme_true(Token t) {
-  return (t.type != T_FALSE);
+Token* scheme_add(Token *t1, Token *t2) {
+  if (t1->type == T_NUMBER && t2->type == T_NUMBER)
+    return tFromNumber(t1->number + t2->number);
 }
 
-short nullp(Token t) {
-  return (t.type == T_PAIR && t.pair == NULL);
+Token* scheme_sub(Token *t1, Token *t2) {
+  if (t1->type == T_NUMBER && t2->type == T_NUMBER)
+    return tFromNumber(t1->number - t2->number);
 }
 
-Token eval(Token t) {
-  switch (t.type) {
+Token* scheme_mul(Token *t1, Token *t2) {
+  if (t1->type == T_NUMBER && t2->type == T_NUMBER)
+    return tFromNumber(t1->number * t2->number);
+}
+
+Token* scheme_div(Token *t1, Token *t2) {
+  if (t1->type == T_NUMBER && t2->type == T_NUMBER)
+    return tFromNumber(t1->number / t2->number);
+}
+
+short scheme_true(Token *t) {
+  return (t->type != T_FALSE);
+}
+
+short nullp(Token *t) {
+  return (t->type == T_PAIR && t->pair == NULL);
+}
+
+Binding *makeGlobalFrame() {
+  Binding *b = makeNewFrame(NULL);
+  bindPrimitiveProc(b, "car", (Token *(*)(Token *, Token *)) car);
+  bindPrimitiveProc(b, "cdr", (Token *(*)(Token *, Token *)) cdr);
+  bindPrimitiveProc(b, "cons", (Token *(*)(Token *, Token *)) cons);
+  bindPrimitiveProc(b, "+", (Token *(*)(Token *, Token *)) scheme_add);
+  bindPrimitiveProc(b, "-", (Token *(*)(Token *, Token *)) scheme_sub);
+  bindPrimitiveProc(b, "*", (Token *(*)(Token *, Token *)) scheme_mul);
+  bindPrimitiveProc(b, "/", (Token *(*)(Token *, Token *)) scheme_div);
+  return b;
+}
+
+Token *eval(Token *t, Binding *b) {
+  switch (t->type) {
   case T_SYMBOL:
-    break;
+    return findBinding(b, t->symbol)->item;
   case T_NUMBER: case T_TRUE: case T_FALSE:
     return t;
   case T_PAIR:
@@ -300,16 +360,17 @@ Token eval(Token t) {
 
 void test() {
   clrscr();
-  Token null = tFromStr("nil");
-  Token t1 = tFromStr("vas");
-  Token t2 = tFromStr("102.32");
-  Token t3 = cons(t1, cons(t2, null));
-  Token t0 = cons(t3, cons(null, null));
+  Token *null = tFromStr("nil");
+  Token *t1 = tFromStr("vas");
+  Token *t2 = tFromStr("102.32");
+  Token *t3 = cons(t1, cons(t2, null));
+  Token *t0 = cons(t3, cons(null, null));
+  Token *dummy = NULL;
   printToken(t0);
   printf("\n");
-  printToken(car(t0));
+  printToken(car(t0, dummy));
   printf("\n");
-  printToken(cdr(cdr(car(t0))));
+  printToken(cdr(cdr(car(t0, dummy), dummy), dummy));
   printf("\n");
   printToken(tokenize("(define fact (lambda (n) (if (<= n 1) 1 (* n (fact (- n 1))))))"));  
   ngetchx();
@@ -331,6 +392,10 @@ void test() {
   printf("\n");
   printToken(findBinding(c, ca)->item);
   printf("\n");
+  ngetchx();
+  clrscr();
+  b = makeGlobalFrame();
+  printBinding(b);
   ngetchx();
 }
 
